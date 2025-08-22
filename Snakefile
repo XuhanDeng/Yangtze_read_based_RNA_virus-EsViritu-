@@ -43,6 +43,8 @@ rule all:
         expand("results/6_bowtie2/reduntant/3_coverm/tpm/{sample}/{sample}.tpm.tsv", sample=config["samples"]),
     # Step 8: Merge CoverM results
         "results/6_bowtie2/redundant/merged_comprehensive_table.tsv",
+    # Step 9: Convert count to RPKMF
+        "results/8_rpkmf_prep/merged_rpkmf_with_reference_table.tsv",
 
 
 # Rule 0: Download EsViritu database (runs only once)
@@ -360,6 +362,103 @@ rule merge_coverm_results:
             >> {log.out} 2>> {log.err}
             
         echo "CoverM results merged successfully."
+        """
+
+# Rule 12: Count filtered reads from ribodetector output
+rule count_filtered_reads:
+    input:
+        r1 = "results/2_ribodetector/{sample}/{sample}_nonrrna.1.fq.gz",
+        r2 = "results/2_ribodetector/{sample}/{sample}_nonrrna.2.fq.gz"
+    output:
+        count_file = "results/8_rpkmf_prep/filtered_reads/{sample}_filtered_count.txt"
+    resources:
+        mem_mb_per_cpu = config["regular_memory"],  # MB
+        runtime = 10,  # minutes
+        cpus_per_task = 1,
+        slurm_partition = config["regular_partition"],
+        slurm_account = config["account"]
+    log:
+        out="log/count_filtered_reads_{sample}.log",
+        err="log/count_filtered_reads_{sample}.err"
+    shell:
+        """
+        mkdir -p results/8_rpkmf_prep/filtered_reads
+        mkdir -p log
+        
+        # Count reads in both R1 and R2 files
+        r1_count=$(zcat {input.r1} | wc -l | awk '{{print $1/4}}')
+        r2_count=$(zcat {input.r2} | wc -l | awk '{{print $1/4}}')
+        
+        # Total filtered reads (R1 + R2)
+        total_reads=$(echo "$r1_count + $r2_count" | bc)
+        
+        echo $total_reads > {output.count_file}
+        
+        echo "Filtered reads counted for {wildcards.sample}: $total_reads"
+        """
+
+# Rule 13: Get contig lengths from virus FASTA
+rule get_contig_lengths:
+    input:
+        fasta = "database/ncbi_virref_20250801.fasta"
+    output:
+        lengths = "results/8_rpkmf_prep/contig_lengths.tsv"
+    resources:
+        mem_mb_per_cpu = config["regular_memory"],  # MB
+        runtime = 10,  # minutes
+        cpus_per_task = 1,
+        slurm_partition = config["regular_partition"],
+        slurm_account = config["account"]
+    log:
+        out="log/get_contig_lengths.log",
+        err="log/get_contig_lengths.err"
+    shell:
+        """
+        mkdir -p results/8_rpkmf_prep
+        mkdir -p log
+        
+        # Use seqkit to get sequence lengths
+        seqkit fx2tab --length --name --header-line {input.fasta} | \\
+            awk 'BEGIN{{OFS="\\t"}} NR==1{{print "Accession", "Length"}} NR>1{{print $1, $2}}' > {output.lengths} \\
+            2>> {log.err}
+        
+        echo "Contig lengths extracted: $(wc -l < {output.lengths}) sequences"
+        """
+
+# Rule 14: Convert CoverM count to RPKMF
+rule convert_count_to_rpkmf:
+    input:
+        count_tables = ["results/6_bowtie2/redundant/merged_count_table.tsv", 
+                       "results/6_bowtie2/redundant/merged_count_with_reference_table.tsv"],
+        filtered_counts = expand("results/8_rpkmf_prep/filtered_reads/{sample}_filtered_count.txt", sample=config["samples"]),
+        contig_lengths = "results/8_rpkmf_prep/contig_lengths.tsv"
+    output:
+        rpkmf_table = "results/8_rpkmf_prep/merged_rpkmf_table.tsv",
+        rpkmf_with_ref = "results/8_rpkmf_prep/merged_rpkmf_with_reference_table.tsv"
+    resources:
+        mem_mb_per_cpu = config["regular_memory"],  # MB
+        runtime = 15,  # minutes
+        cpus_per_task = 1,
+        slurm_partition = config["regular_partition"],
+        slurm_account = config["account"]
+    log:
+        out="log/convert_count_to_rpkmf.log",
+        err="log/convert_count_to_rpkmf.err"
+    shell:
+        """
+        mkdir -p results/8_rpkmf_prep
+        mkdir -p log
+        
+        python scripts/convert_count_to_rpkmf.py \
+            --count-table results/6_bowtie2/redundant/merged_count_table.tsv \
+            --count-with-ref-table results/6_bowtie2/redundant/merged_count_with_reference_table.tsv \
+            --filtered-reads-dir results/8_rpkmf_prep/filtered_reads \
+            --contig-lengths results/8_rpkmf_prep/contig_lengths.tsv \
+            --output-rpkmf {output.rpkmf_table} \
+            --output-rpkmf-ref {output.rpkmf_with_ref} \
+            >> {log.out} 2>> {log.err}
+            
+        echo "Count to RPKMF conversion completed successfully."
         """
 
 
