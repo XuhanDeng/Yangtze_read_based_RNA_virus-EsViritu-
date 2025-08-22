@@ -38,7 +38,18 @@ def merge_coverm_results(input_dir, output_dir, metrics=None):
         print(f"Error: No sample directories found in {input_dir}")
         return None
     
+    # Sort samples by numeric suffix (extract number at the end of sample name)
+    def extract_numeric_suffix(sample_name):
+        import re
+        # Find the last number in the sample name
+        match = re.search(r'(\d+)$', sample_name)
+        return int(match.group(1)) if match else float('inf')
+    
+    sample_names = sorted(sample_names, key=extract_numeric_suffix)
+    print(f"First 10 samples in numeric order: {sample_names[:10]}")
+    
     print(f"Found {len(sample_names)} samples to process")
+    print(f"Sample order: {sample_names[:5]}..." if len(sample_names) > 5 else f"Sample order: {sample_names}")
     
     # Process each metric type
     for metric in metrics:
@@ -80,6 +91,21 @@ def merge_coverm_results(input_dir, output_dir, metrics=None):
         else:
             tpm_df = combined_df
     
+    # Reorder columns to match sample order for each metric dataframe
+    def reorder_columns(df, sample_names, metric):
+        if df is None:
+            return None
+        # Create ordered column list: Contig first, then samples in numeric order
+        ordered_cols = ['Contig'] + [f"{sample}_{metric}" for sample in sample_names]
+        # Only keep columns that actually exist in the dataframe
+        existing_cols = [col for col in ordered_cols if col in df.columns]
+        return df[existing_cols]
+    
+    # Reorder columns in each dataframe
+    count_df = reorder_columns(count_df, sample_names, 'count')
+    coverage_df = reorder_columns(coverage_df, sample_names, 'coverage') 
+    tpm_df = reorder_columns(tpm_df, sample_names, 'tpm')
+    
     # Save individual metric files
     for df, metric in [(count_df, 'count'), (coverage_df, 'coverage'), (tpm_df, 'tpm')]:
         if df is not None:
@@ -95,15 +121,27 @@ def merge_coverm_results(input_dir, output_dir, metrics=None):
         # Start with count data
         merged_all = count_df.copy()
         
-        # Add coverage data
+        # Add coverage data (maintaining sample order)
         coverage_cols = [col for col in coverage_df.columns if col != 'Contig']
         for col in coverage_cols:
             merged_all = pd.merge(merged_all, coverage_df[['Contig', col]], on='Contig', how='outer')
         
-        # Add TPM data
+        # Add TPM data (maintaining sample order)
         tpm_cols = [col for col in tpm_df.columns if col != 'Contig']
         for col in tpm_cols:
             merged_all = pd.merge(merged_all, tpm_df[['Contig', col]], on='Contig', how='outer')
+        
+        # Reorder columns in comprehensive table: Contig, then all count, all coverage, all tpm
+        ordered_comprehensive_cols = ['Contig']
+        for sample in sample_names:
+            # Add count, coverage, tpm for each sample in order
+            for metric in ['count', 'coverage', 'tpm']:
+                col_name = f"{sample}_{metric}"
+                if col_name in merged_all.columns:
+                    ordered_comprehensive_cols.append(col_name)
+        
+        # Reorder the comprehensive dataframe
+        merged_all = merged_all[ordered_comprehensive_cols]
         
         # Fill NaN values with 0
         merged_all = merged_all.fillna(0)
