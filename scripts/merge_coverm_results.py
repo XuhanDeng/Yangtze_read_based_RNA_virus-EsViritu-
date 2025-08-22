@@ -3,42 +3,52 @@
 import os
 import pandas as pd
 import glob
+import argparse
 from pathlib import Path
 
-def merge_coverm_results():
+def merge_coverm_results(input_dir, output_dir, metrics=None):
     """
     Merge count, coverage, and TPM results from CoverM analysis
+    
+    Args:
+        input_dir: Directory containing CoverM results (should have count/, coverage/, tpm/ subdirs)
+        output_dir: Directory to save merged results
+        metrics: List of metrics to process (default: ['count', 'coverage', 'tpm'])
     """
-    base_dir = "/Users/dengxuhan/Desktop/yangtze/RNA/read_based/results/6_bowtie2/reduntant/3_coverm"
-    output_dir = "/Users/dengxuhan/Desktop/yangtze/RNA/read_based/results/6_bowtie2/redundant"
+    if metrics is None:
+        metrics = ['count', 'coverage', 'tpm']
+    
+    # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
     
     # Initialize empty dataframes for each metric
     count_df = None
     coverage_df = None
     tpm_df = None
     
-    # Get all sample directories
-    count_dirs = glob.glob(os.path.join(base_dir, "count", "*"))
-    sample_names = [os.path.basename(d) for d in count_dirs]
+    # Get all sample directories from the first available metric
+    sample_names = []
+    for metric in metrics:
+        metric_dirs = glob.glob(os.path.join(input_dir, metric, "*"))
+        if metric_dirs:
+            sample_names = [os.path.basename(d) for d in metric_dirs]
+            break
+    
+    if not sample_names:
+        print(f"Error: No sample directories found in {input_dir}")
+        return None
     
     print(f"Found {len(sample_names)} samples to process")
     
     # Process each metric type
-    for metric in ['count', 'coverage', 'tpm']:
+    for metric in metrics:
         print(f"Processing {metric} data...")
         combined_df = None
         
         for sample in sample_names:
             # Construct file path
-            if metric == 'count':
-                file_path = os.path.join(base_dir, metric, sample, f"{sample}.count.tsv")
-                col_name = f"{sample}_count"
-            elif metric == 'coverage':
-                file_path = os.path.join(base_dir, metric, sample, f"{sample}.coverage.tsv")
-                col_name = f"{sample}_coverage"
-            else:  # tpm
-                file_path = os.path.join(base_dir, metric, sample, f"{sample}.tpm.tsv")
-                col_name = f"{sample}_tpm"
+            file_path = os.path.join(input_dir, metric, sample, f"{sample}.{metric}.tsv")
+            col_name = f"{sample}_{metric}"
             
             # Check if file exists
             if not os.path.exists(file_path):
@@ -116,5 +126,68 @@ def merge_coverm_results():
         print("Error: Could not create comprehensive table - some metric dataframes are missing")
         return None
 
+def main():
+    parser = argparse.ArgumentParser(
+        description="Merge CoverM count, coverage, and TPM results from multiple samples"
+    )
+    
+    parser.add_argument(
+        "-i", "--input-dir",
+        required=True,
+        help="Input directory containing CoverM results (should have count/, coverage/, tpm/ subdirs)"
+    )
+    
+    parser.add_argument(
+        "-o", "--output-dir", 
+        required=True,
+        help="Output directory to save merged results"
+    )
+    
+    parser.add_argument(
+        "-m", "--metrics",
+        nargs="+",
+        default=["count", "coverage", "tpm"],
+        choices=["count", "coverage", "tpm"],
+        help="Metrics to process (default: count coverage tpm)"
+    )
+    
+    parser.add_argument(
+        "--comprehensive",
+        action="store_true",
+        default=True,
+        help="Create comprehensive table with all metrics (default: True)"
+    )
+    
+    parser.add_argument(
+        "--no-comprehensive",
+        action="store_true",
+        help="Skip creating comprehensive table"
+    )
+    
+    args = parser.parse_args()
+    
+    # Handle comprehensive table flag
+    create_comprehensive = args.comprehensive and not args.no_comprehensive
+    
+    print(f"Input directory: {args.input_dir}")
+    print(f"Output directory: {args.output_dir}")
+    print(f"Processing metrics: {args.metrics}")
+    print(f"Create comprehensive table: {create_comprehensive}")
+    print()
+    
+    result = merge_coverm_results(
+        input_dir=args.input_dir,
+        output_dir=args.output_dir,
+        metrics=args.metrics
+    )
+    
+    if result is not None:
+        print("\n✅ Merge completed successfully!")
+    else:
+        print("\n❌ Merge failed!")
+        return 1
+    
+    return 0
+
 if __name__ == "__main__":
-    result = merge_coverm_results()
+    exit(main())
