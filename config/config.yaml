@@ -115,3 +115,4 @@ merge_coverm:
   input_dir: "results/6_bowtie2/reduntant/3_coverm"
   output_dir: "results/6_bowtie2/redundant"
   metrics: ["count", "coverage", "tpm"]
+  reference_csv: "database/ncbi_virref_20250801.csv"

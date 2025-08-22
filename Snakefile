@@ -356,6 +356,7 @@ rule merge_coverm_results:
             --input-dir {config[merge_coverm][input_dir]} \
             --output-dir {config[merge_coverm][output_dir]} \
             --metrics count coverage tpm \
+            --reference-csv {config[merge_coverm][reference_csv]} \
             >> {log.out} 2>> {log.err}
             
         echo "CoverM results merged successfully."

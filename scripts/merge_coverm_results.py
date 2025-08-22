@@ -6,7 +6,7 @@ import glob
 import argparse
 from pathlib import Path
 
-def merge_coverm_results(input_dir, output_dir, metrics=None):
+def merge_coverm_results(input_dir, output_dir, metrics=None, reference_csv=None):
     """
     Merge count, coverage, and TPM results from CoverM analysis
     
@@ -14,12 +14,26 @@ def merge_coverm_results(input_dir, output_dir, metrics=None):
         input_dir: Directory containing CoverM results (should have count/, coverage/, tpm/ subdirs)
         output_dir: Directory to save merged results
         metrics: List of metrics to process (default: ['count', 'coverage', 'tpm'])
+        reference_csv: Path to NCBI virus reference CSV file to merge with results
     """
     if metrics is None:
         metrics = ['count', 'coverage', 'tpm']
     
     # Ensure output directory exists
     os.makedirs(output_dir, exist_ok=True)
+    
+    # Load reference CSV if provided
+    reference_df = None
+    if reference_csv and os.path.exists(reference_csv):
+        try:
+            reference_df = pd.read_csv(reference_csv)
+            print(f"Loaded reference CSV: {reference_csv}")
+            print(f"Reference CSV shape: {reference_df.shape}")
+        except Exception as e:
+            print(f"Warning: Could not load reference CSV {reference_csv}: {e}")
+            reference_df = None
+    elif reference_csv:
+        print(f"Warning: Reference CSV file not found: {reference_csv}")
     
     # Initialize empty dataframes for each metric
     count_df = None
@@ -109,9 +123,44 @@ def merge_coverm_results(input_dir, output_dir, metrics=None):
     coverage_df = reorder_columns(coverage_df, sample_names, 'coverage') 
     tpm_df = reorder_columns(tpm_df, sample_names, 'tpm')
     
-    # Save individual metric files
+    # Function to merge with reference data
+    def merge_with_reference(df, reference_df, suffix=""):
+        if df is None or reference_df is None:
+            return df
+        try:
+            # Create a copy of df with version-stripped Contig for matching
+            df_copy = df.copy()
+            # Strip version numbers from Contig IDs (e.g., NC_000898.1 -> NC_000898)
+            df_copy['Contig_base'] = df_copy['Contig'].str.replace(r'\.\d+$', '', regex=True)
+            
+            # Merge on Contig_base = Accession 
+            merged = pd.merge(reference_df, df_copy, left_on='Accession', right_on='Contig_base', how='right')
+            
+            # Keep original Contig column and drop the temporary Contig_base
+            if 'Contig_base' in merged.columns:
+                merged = merged.drop('Contig_base', axis=1)
+            
+            # Count successful matches
+            matches = merged['Accession'].notna().sum()
+            total = len(merged)
+            print(f"  Merged with reference data{suffix}: {merged.shape} ({matches}/{total} matches)")
+            return merged
+        except Exception as e:
+            print(f"  Warning: Could not merge with reference data{suffix}: {e}")
+            return df
+
+    # Save individual metric files (with reference data if available)
     for df, metric in [(count_df, 'count'), (coverage_df, 'coverage'), (tpm_df, 'tpm')]:
         if df is not None:
+            # Merge with reference data if available
+            if reference_df is not None:
+                df_with_ref = merge_with_reference(df, reference_df, f" for {metric}")
+                ref_output_file = os.path.join(output_dir, f"merged_{metric}_with_reference_table.tsv")
+                df_with_ref.to_csv(ref_output_file, sep='\t', index=False)
+                print(f"Saved {metric} table with reference: {ref_output_file}")
+                print(f"  Shape: {df_with_ref.shape}")
+            
+            # Also save original without reference
             output_file = os.path.join(output_dir, f"merged_{metric}_table.tsv")
             df.to_csv(output_file, sep='\t', index=False)
             print(f"Saved {metric} table: {output_file}")
@@ -149,7 +198,15 @@ def merge_coverm_results(input_dir, output_dir, metrics=None):
         # Fill NaN values with 0
         merged_all = merged_all.fillna(0)
         
-        # Save comprehensive table
+        # Save comprehensive table with reference data if available
+        if reference_df is not None:
+            comprehensive_with_ref = merge_with_reference(merged_all, reference_df, " for comprehensive")
+            comprehensive_ref_output = os.path.join(output_dir, "merged_comprehensive_with_reference_table.tsv")
+            comprehensive_with_ref.to_csv(comprehensive_ref_output, sep='\t', index=False)
+            print(f"Saved comprehensive table with reference: {comprehensive_ref_output}")
+            print(f"  Shape: {comprehensive_with_ref.shape}")
+        
+        # Save original comprehensive table without reference
         comprehensive_output = os.path.join(output_dir, "merged_comprehensive_table.tsv")
         merged_all.to_csv(comprehensive_output, sep='\t', index=False)
         print(f"Saved comprehensive table: {comprehensive_output}")
@@ -160,6 +217,8 @@ def merge_coverm_results(input_dir, output_dir, metrics=None):
         print(f"Total contigs: {len(merged_all)}")
         print(f"Total samples: {len(sample_names)}")
         print(f"Columns in comprehensive table: {len(merged_all.columns)}")
+        if reference_df is not None:
+            print(f"Reference data columns: {len(reference_df.columns)}")
         
         return merged_all
     
@@ -205,6 +264,11 @@ def main():
         help="Skip creating comprehensive table"
     )
     
+    parser.add_argument(
+        "-r", "--reference-csv",
+        help="Path to NCBI virus reference CSV file to merge with results"
+    )
+    
     args = parser.parse_args()
     
     # Handle comprehensive table flag
@@ -219,7 +283,8 @@ def main():
     result = merge_coverm_results(
         input_dir=args.input_dir,
         output_dir=args.output_dir,
-        metrics=args.metrics
+        metrics=args.metrics,
+        reference_csv=args.reference_csv
     )
     
     if result is not None:
