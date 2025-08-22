@@ -57,6 +57,11 @@ account: "research-ceg-wm"
 regular_partition: "compute"
 regular_memory: "3900" # MB
 
+
+#database
+databases:
+  ncbi_vir_reduntant: "databases/ncbi_vir_refseq/ncbi_virref_20250801.fasta"
+
 # Tool-specific parameters
 fastp:
   threads: 4
@@ -84,5 +89,29 @@ esviritu:
 
 virbot:
   threads: 16
-  runtime: 7200  # minutes (120 hours)
+  runtime: 3600  # minutes (60 hours)
 
+bowtie2_reduntant_index:
+  threads: 8
+  runtime: 3600  # minutes (60 hours)
+  index_name: "ncbi_vir_reduntant"
+
+
+bowtie2_reduntant:
+  threads: 8
+  runtime: 3600  # minutes (60 hours)
+  index_name: "ncbi_vir_reduntant"
+
+
+coverm:
+  threads: 4
+  runtime: 1000  # minutes (16.67 hours)
+  min-read-percentage-identity: 95
+  min-read-aligned-percent: 90
+  contig-end-exclusion: 0
+
+merge_coverm:
+  runtime: 30  # minutes
+  input_dir: "results/6_bowtie2/reduntant/3_coverm"
+  output_dir: "results/6_bowtie2/redundant"
+  metrics: ["count", "coverage", "tpm"]

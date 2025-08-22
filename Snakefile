@@ -396,7 +396,7 @@ rule merge_coverm_results:
         comprehensive = "results/6_bowtie2/redundant/merged_comprehensive_table.tsv"
     resources:
         mem_mb_per_cpu = config["regular_memory"],  # MB
-        runtime = config["merge_coverm"]["runtime"] if "merge_coverm" in config else 30,  # minutes
+        runtime = config["merge_coverm"]["runtime"],  # minutes
         cpus_per_task = 1,
         slurm_partition = config["regular_partition"],
         slurm_account = config["account"]
@@ -405,13 +405,13 @@ rule merge_coverm_results:
         err="log/merge_coverm_results.err"
     shell:
         """
-        mkdir -p results/6_bowtie2/redundant
+        mkdir -p {config[merge_coverm][output_dir]}
         mkdir -p log
         
         python scripts/merge_coverm_results.py \
-            --input-dir results/6_bowtie2/reduntant/3_coverm \
-            --output-dir results/6_bowtie2/redundant \
-            --metrics count coverage tpm \
+            --input-dir {config[merge_coverm][input_dir]} \
+            --output-dir {config[merge_coverm][output_dir]} \
+            --metrics {" ".join(config["merge_coverm"]["metrics"])} \
             >> {log.out} 2>> {log.err}
             
         echo "CoverM results merged successfully."
