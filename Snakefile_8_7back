@@ -205,7 +205,7 @@ rule esviritu_identification:
         r2 = "results/2_ribodetector/{sample}/{sample}_nonrrna.2.fq.gz",
         db_flag = "databases/esviritu_DB/v3.1.1/database.ready"
     output:
-        results = "results/5_esviritu_merge/{sample}.done"
+        results = "results/5_esviritu/{sample}/{sample}.detected_virus.info.tsv"
     conda:
         "envs/esviritu.yaml"
     resources:
@@ -219,27 +219,49 @@ rule esviritu_identification:
         err="log/5_esviritu/{sample}.err"
     shell:
         """
-        mkdir -p results/5_esviritu_merge
+        mkdir -p results/5_esviritu/{wildcards.sample}
         EsViritu -r {input.r1} {input.r2} \
                  -s {wildcards.sample} \
                  -t {threads} \
-                 -o results/5_esviritu_merge \
+                 -o results/5_esviritu/{wildcards.sample} \
                  -p {config[esviritu][mode]} > {log.out} 2>> {log.err}
-        
-        # Create completion flag
-        touch {output.results}
         """
 
-
+'''
+# Rule 6: Assembly-based viral identification with virbot
+rule virbot_identification:
+    input:
+        assembly = "results/4_reformat/{sample}_reformat.fasta"
+    output:
+        results = directory("results/6_virbot/{sample}")
+    conda:
+        "envs/virbot.yaml"
+    resources:
+        mem_mb_per_cpu = config["regular_memory"],  # MB
+        runtime = config["virbot"]["runtime"],
+        cpus_per_task = config["virbot"]["threads"],
+        slurm_partition = config["regular_partition"],
+        slurm_account = config["account"]
+    log:
+        out="log/6_virbot/{sample}.log",
+        err="log/6_virbot/{sample}.err"
+    shell:
+        """
+        mkdir -p results/6_virbot
+        virbot --input {input.assembly} \
+               --output {output.results} \
+               --thread {threads} > {log.out} 1> {log.err}
+        """
+'''
 
 # Rule 7: Merge EsViritu results
 rule merge_esviritu_results:
     input:
-        results = expand("results/5_esviritu_merge/{sample}.done", sample=config["samples"])
+        results = expand("results/5_esviritu/{sample}/{sample}.detected_virus.info.tsv", sample=config["samples"])
     output:
         merged = "results/7_merged/esviritu_VIR_table.xlsx"
     conda:
-        "envs/esviritu.yaml"
+        "envs/python.yaml"
     resources:
         mem_mb_per_cpu = config["regular_memory"],  # MB
         runtime = 30,  # minutes
@@ -249,9 +271,5 @@ rule merge_esviritu_results:
     log:
         out="log/7_merged/merge_results.log",
         err="log/7_merged/merge_results.err"
-    shell:
-        """
-        mkdir -p results/7_merged \
-        summarize_esv_runs {input.results} \
-        touch {output.merged}   > {log.out} 2>> {log.err}
-        """
+    script:
+        "scripts/merge_esviritu_results.py"
