@@ -153,62 +153,6 @@ rule ribodetector_rrna_removal:
                          -o {output.r1_nonrrna} {output.r2_nonrrna} > {log.out} 1> {log.err}
         """
 
-# Rule 3: Viral sequence assembly with metaspades
-rule spades_assembly:
-    input:
-        r1 = "results/2_ribodetector/{sample}/{sample}_nonrrna.1.fq.gz",
-        r2 = "results/2_ribodetector/{sample}/{sample}_nonrrna.2.fq.gz"
-    output:
-        scaffolds = "results/3_spades/{sample}/scaffolds.fasta",
-        contigs = "results/3_spades/{sample}/contigs.fasta"
-    conda:
-        "envs/spades.yaml"
-    resources:
-        mem_mb_per_cpu = config["spades"]["spade_memory"],  # MB
-        runtime = config["spades"]["runtime"],
-        cpus_per_task = config["spades"]["threads"],
-        slurm_partition = config["spades"]["spade_partition"],
-        slurm_account = config["account"]
-    log:
-        out="log/3_spades/{sample}.log",
-        err="log/3_spades/{sample}.err"
-    shell:
-        """
-        mkdir -p results/3_spades/{wildcards.sample}
-        spades.py --meta \
-                  -o results/3_spades/{wildcards.sample} \
-                  -1 {input.r1} -2 {input.r2} \
-                  -t {threads} -m {resources.mem_mb_per_cpu} \
-                  -k {config[spades][kmers]} \
-                  --only-assembler > {log.out} 1> {log.err}
-        """
-
-# Rule 4: Reformat assembly sequences
-rule reformat_assemblies:
-    input:
-        scaffolds = "results/3_spades/{sample}/scaffolds.fasta"
-    output:
-        reformatted = "results/4_reformat/{sample}_reformat.fasta"
-    conda:
-        "envs/seqkit.yaml"
-    resources:
-        mem_mb_per_cpu = config["regular_memory"],  # MB
-        runtime = 60,  # minutes
-        cpus_per_task = 1,
-        slurm_partition = config["regular_partition"],
-        slurm_account = config["account"]
-    log:
-        out="log/4_reformat/{sample}.log",
-        err="log/4_reformat/{sample}.err"
-    shell:
-        """
-        mkdir -p results/4_reformat
-        seqkit replace -p "^(.+)$" -r "{wildcards.sample}_scaffold_{{nr}}" \
-               --nr-width 10 \
-               -o {output.reformatted} \
-               {input.scaffolds} > {log.out} 1> {log.err}
-        """
-
 # Rule 5: Read-based viral identification with EsViritu
 rule esviritu_identification:
     input:
@@ -411,7 +355,7 @@ rule merge_coverm_results:
         python scripts/merge_coverm_results.py \
             --input-dir {config[merge_coverm][input_dir]} \
             --output-dir {config[merge_coverm][output_dir]} \
-            --metrics {" ".join(config["merge_coverm"]["metrics"])} \
+            --metrics count coverage tpm \
             >> {log.out} 2>> {log.err}
             
         echo "CoverM results merged successfully."

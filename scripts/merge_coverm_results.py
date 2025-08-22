@@ -83,7 +83,10 @@ def merge_coverm_results(input_dir, output_dir, metrics=None):
                 print(f"Error processing {file_path}: {e}")
                 continue
         
-        # Store the combined dataframe
+        # Fill NaN values with 0 and store the combined dataframe
+        if combined_df is not None:
+            combined_df = combined_df.fillna(0)
+        
         if metric == 'count':
             count_df = combined_df
         elif metric == 'coverage':
