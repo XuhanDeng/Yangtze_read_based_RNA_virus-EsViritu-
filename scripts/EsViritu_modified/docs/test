@@ -1,0 +1,98 @@
+samtools view -c test/test_temp/test.initial.filt.sorted.bam
+samtools view -c test/test_temp/test.second.filt.bam
+samtools view -c test/test_temp/test.third.filt.bam
+
+samtools view -c test2/test2_temp/test2.initial.filt.sorted.bam
+samtools view -c test2/test2_temp/test2.second.filt.bam
+samtools view -c test2/test2_temp/test2.third.filt.bam
+
+samtools view test.third.filt.sorted.bam | cut -f1 | sort -u
+
+samtools view -c test.third.filt.sorted.bam
+samtools view -c test.third.filt.unmapped.bam
+samtools view -c test.third.filt.failed.bam
+
+
+
+samtools view -c test.third.filt.sorted.bam
+samtools view  test/test_temp/test.third.filt.bam | cut -f1 | sort -u| wc -l
+
+
+cd /scratch/xddeng/yangtze/RNA
+
+python ../script/EsViritu_modified/src/EsViritu/EsViritu.py  -r read_based_new/results/2_ribodetector/GYG_N_0/GYG_N_0_nonrrna.sub_1.fq.gz read_based_new/results/2_ribodetector/GYG_N_0/GYG_N_0_nonrrna.sub_2.fq.gz -s test -o test --db read_based_new/database/esviritu/v3.2.4 --keep True 
+
+
+
+
+seqkit grep -v -n -f /scratch/xddeng/yangtze/RNA/test/test_temp/mapped.txt GYG_N_0_nonrrna.sub_1.fq.gz > failed_R1.fastq.gz
+seqkit grep -v -n -f /scratch/xddeng/yangtze/RNA/test/test_temp/mapped.txt GYG_N_0_nonrrna.sub_2.fq.gz > failed_R2.fastq.gz
+
+
+seqkit grep -v -r -f  /scratch/xddeng/yangtze/RNA/test/test_temp/mapped.txt  \
+  --id-regexp '^[^ ]+' \
+  GYG_N_0_nonrrna.sub_1.fq.gz > failed_R1.fastq.gz
+
+
+
+
+
+seqkit replace \
+  -p '^([^ ]+)' \
+  -r '\1_1' \
+  GYG_N_0_nonrrna.sub_1.fq.gz | gzip > GYG_N_0_nonrrna.sub_1.tagged.fq.gz
+
+  seqkit replace \
+  -p '^([^ ]+)' \
+  -r '\1_2' \
+  GYG_N_0_nonrrna.sub_2.fq.gz | gzip > GYG_N_0_nonrrna.sub_2.tagged.fq.gz
+
+
+
+
+
+zcat GYG_N_0_nonrrna.sub_1.tagged.fq.gz | head -n 20
+
+
+
+python ../script/EsViritu_modified/src/EsViritu/EsViritu.py  -r read_based_new/results/2_ribodetector/GYG_N_0/GYG_N_0_nonrrna.sub_1.fq.gz read_based_new/results/2_ribodetector/GYG_N_0/GYG_N_0_nonrrna.sub_2.fq.gz -s test2 -o test2 --db read_based_new/database/esviritu/v3.2.4 --keep True -q False
+
+
+python ../script/EsViritu_modified/src/EsViritu/EsViritu.py  -r read_based_new/results/2_ribodetector/GYG_N_0/GYG_N_0_nonrrna.sub_1.tagged.fq.gz read_based_new/results/2_ribodetector/GYG_N_0/GYG_N_0_nonrrna.sub_2.tagged.fq.gz -s test -o test --db read_based_new/database/esviritu/v3.2.4 --keep True -q False
+
+
+
+python ../script/EsViritu_modified/src/EsViritu/EsViritu.py  -r read_based_new/results/2_ribodetector/GYG_N_0/GYG_N_0_nonrrna.sub.merged.fq.gz -s test -o test --db read_based_new/database/esviritu/v3.2.4 --keep True -q False
+
+  GYG_N_0_nonrrna.sub_1.tagged.fq.gz
+
+
+
+
+  zcat GYG_N_0_nonrrna.sub_1.fq.gz | \
+gawk 'NR%4==1{$0=gensub(/^@([^ ]+)/, "@\\1_1", 1)} {print}' | \
+gzip > GYG_N_0_nonrrna.sub_1.tagged.fq.gz
+
+
+zcat GYG_N_0_nonrrna.sub_2.fq.gz | \
+gawk 'NR%4==1{$0=gensub(/^@([^ ]+)/, "@\\1_2", 1)} {print}' | \
+gzip > GYG_N_0_nonrrna.sub_2.tagged.fq.gz
+
+
+
+
+
+
+# R1
+zcat GYG_N_0_nonrrna.sub_1.fq.gz | \
+gawk 'NR%4==1{
+  split($0,a," "); id=substr(a[1],2);
+  print "@1_" id "/1"; next
+} {print}' | gzip > GYG_N_0_nonrrna.sub_1.tagged.fq.gz
+
+# R2
+zcat GYG_N_0_nonrrna.sub_2.fq.gz | \
+gawk 'NR%4==1{
+  split($0,a," "); id=substr(a[1],2);
+  print "@2_" id "/2"; next
+} {print}' | gzip > GYG_N_0_nonrrna.sub_2.tagged.fq.gz

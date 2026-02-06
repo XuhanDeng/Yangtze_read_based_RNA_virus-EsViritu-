@@ -1,0 +1,20 @@
+CPU: 8
+DB: /scratch/xddeng/yangtze/RNA/read_based_new/database/esviritu/v3.2.4
+DEDUP: false
+FILTER_DIR: /scratch/xddeng/database/esviritu_DB/v3.1.1
+FILTER_SEQS: false
+KEEP: false
+MMK: 50M
+OUTPUT_DIR: ./testorg
+QUAL: false
+READS:
+- results/2_ribodetector/GYG_N_0/GYG_N_0_nonrrna.sub_1.fq.gz
+- results/2_ribodetector/GYG_N_0/GYG_N_0_nonrrna.sub_2.fq.gz
+READ_FMT: paired
+SAMPLE: test_org
+TEMP_DIR: /scratch/xddeng/yangtze/RNA/read_based_new/./testorg/test_org_temp
+c_workdir: /scratch/xddeng/yangtze/RNA/read_based_new
+log_file: /scratch/xddeng/yangtze/RNA/read_based_new/./testorg/test_org_esviritu.log
+spthresh: 0.9
+subspthresh: 0.95
+version: 1.1.6
