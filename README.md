@@ -57,8 +57,6 @@ High-level flow:
    - log1p(RPKMF) + Spearman
    - write all correlations and thresholded table
 
-**Pipeline Graph**
-![Pipeline rulegraph](docs/pipeline_rulegraph.png)
 
 ## Inputs
 

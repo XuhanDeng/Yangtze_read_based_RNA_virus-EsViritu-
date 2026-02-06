@@ -56,12 +56,35 @@ RNA_rawdata/
 input/
 database/
 dag.pdf
+pipeline_rulegraph.png
 *.drawio
 
 # Backup / alternate workflow files
 Snakefile_8_7back
 Snakefile_cluster_all
 Snakefile_test.smk
+
+# Local helper scripts / cluster configs
+cluster_config.yaml
+run_local.sh
+run_rule5_and_rule7.sh
+run_rule7_by_name.sh
+setup_esviritu_db.sh
+test_db_download.sh
+
+# Local src helpers
+src/
+
+# Tests and scratch data
+tests/
+input/
+log/
+
+# Local notes
+CLAUDE.md
+
+# Sample list (if managed outside repo)
+config/sample_list.txt
 
 # Bioinformatics files
 *.fasta
