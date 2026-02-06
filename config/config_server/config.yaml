@@ -1,0 +1,169 @@
+# Yangtze River RNA Virus Pipeline Configuration
+
+# Input files and directories
+samples:
+  #- test
+  # - GYG_N_0
+  - GouBa_N_1
+  # - HGMT_N_0
+  - WuRiver_U_2
+  - WuRiver_D_3
+  - RuXiRiver_N_4
+  - WanZhou_N_5
+  - QutangGorge_U_6
+  - QutangGorge_M_7
+  - WuGorge_U_8
+  - WuGorge_M_9
+  - TGR_U_10
+  - TGR_Ma_11
+  - TGR_Mb_12
+  - TGR_Mc_13
+  - TGR_D_14
+  - YiChang_U_15
+  - YiChang_D_16
+  - QingRiver_U_17
+  - JingZhou_U_18
+  - JingZhou_D_19
+  - TiaoguanTown_N_20
+  - DongtingLake_U_21
+  - DongtingLake_M_22
+  - DongtingLake_D_23
+  - WuHan_U_24
+  - WuHan_m_25
+  - WuHan_D_26
+  - HuangShi_N_27
+  - ChangGang_N_28
+  - JiuJiang_U_29
+  - JiuJiang_M_30
+  - JiuJiang_D_31
+  - AnQing_U_32
+  - AnQing_D_33
+  - TongLing_U_34
+  - TongLing_D_35
+  - WuHu_U_36
+  - WuHu_D_37
+  - MaAnShan_N_38
+  - NanJing_U_39
+  - NanJing_D_40
+  - YangZhou_N_41
+  - ZhenJiang_N_42
+  - ChangZhou_N_43
+  - JiangYin_N_44
+  - NanTong_U_45
+  - NanTong_D_46
+  - ChangShu_N_47
+  - TaiCang_N_48
+
+
+# Common resources
+account: "research-ceg-wm"
+slurm_account: "research-ceg-wm"
+regular_partition: "compute"
+regular_memory: 3900 # MB
+
+runtime: 3600 # minutes
+
+
+
+
+
+
+
+
+
+#database
+databases:
+  ncbi_vir_reduntant: "databases/ncbi_vir_refseq/ncbi_virref_20250801.fasta"
+  esviritu_db: "database/esviritu/v3.2.4/virus_pathogen_database.fna"
+  esviritu_db_v3.2.4: "database/esviritu/v3.2.4"
+
+
+
+
+#Script paths
+scripts:
+  checkv_clust: "scripts/checkv/aniclust.py"
+  checkv_ani: "scripts/checkv/anicalc.py"
+  ref_cluster_select: "scripts/Ref_cluster_select.py"
+  modified_esviritu: "scripts/EsViritu_modified/src/EsViritu/EsViritu.py"
+
+
+
+
+
+
+
+
+# Tool-specific parameters
+fastp:
+  threads: 24
+  runtime: 3600  # minutes
+  quality_threshold: 20
+  length_required: 20
+
+ribodetector:
+  threads: 16
+  runtime: 7200  # minutes (120 hours)
+  min_length: 50
+  chunk_size: 10000
+
+spades:
+  threads: 36
+  spade_partition: "compute"
+  spade_memory: 3900  # MB
+  runtime: 7200  # minutes (120 hours)
+  kmers: "21,33,55,77,101,121"
+  memory: 4  # GB for spades.py -m
+  k_values: "21,33,55,77,101,121"
+
+
+merge_esviritu_database_1:
+  threads: 1
+  runtime: 30  # minutes
+  min_length: 200
+  esviritu_db: "database/esviritu/v3.2.4/virus_pathogen_database.fna"
+
+# Select representative sequences from clustering results
+ref_cluster_select:
+  db_id_col: ""            # Optional: column name or 0-based index if DB is a table
+  sample_order: ""         # Optional: comma-separated sample order
+  sample_order_file: ""    # Optional: file with sample order
+  with_cluster_id: false   # Output cluster_id as first column if true
+  output: "results/6_esviritu/databases/cluster/cluster_representatives.txt"
+
+# EsViritu mapping to final merged database
+esviritu_map:
+  db_dir: "results/6_esviritu/databases/final_merged_database"
+  threads: 24
+  runtime: 7200  # minutes
+  extra: ""  # optional extra CLI flags, e.g. "-f False"
+
+
+
+
+checkv:
+  threads: 24
+  runtime: 7200  # minutes (120 hours)
+  mem_mb_per_cpu: 3900  # MB
+  slurm_partition: "compute"
+  min_ani: 95
+  min_coverage: 85
+  min_qcov: 0
+
+checkv_scripts: "scripts/checkv"
+
+
+
+
+
+seqkit:
+  threads: 4
+  min_length: 1000
+  nr_width: 10
+
+mmseqs2:
+  threads: 24
+  runtime: 7200  # minutes (120 hours)
+  min_seq_id: 0.95
+  coverage: 0.8
+  prefix: "All1000_ESViritu"

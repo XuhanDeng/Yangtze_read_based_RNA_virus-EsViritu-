@@ -1,131 +1,120 @@
 #!/usr/bin/env python3
-"""
-Merge EsViritu results from multiple samples
-Adapted from the original esviritu.py script
-"""
 
 import os
 import pandas as pd
+import glob
+import argparse
 from pathlib import Path
 
-def merge_esviritu_results(input_files, output_file):
+def merge_esviritu_results(input_dir, output_file):
     """
-    Merge EsViritu results from multiple samples into a single Excel file
+    Merge EsViritu assembly summary files from all samples into a pivot table format
     
     Args:
-        input_files: List of paths to EsViritu result TSV files
-        output_file: Path to output Excel file
+        input_dir: Directory containing sample subdirectories with EsViritu results
+        output_file: Path to output merged TSV file
     """
     
-    # Initialize empty DataFrame to store concatenated data
-    stack_table = None
+    # Find all assembly summary files
+    assembly_files = glob.glob(os.path.join(input_dir, "*", "*.detected_virus.assembly_summary.tsv"))
     
-    # Process each input file
-    for i, file_path in enumerate(input_files):
-        print(f"Processing file {i+1}/{len(input_files)}: {file_path}")
-        
-        # Read the TSV file into a DataFrame
-        try:
-            df = pd.read_csv(file_path, sep="\t")
-            
-            # If it's the first file, initialize stack_table
-            if stack_table is None:
-                stack_table = df
-            else:
-                # Concatenate with existing data
-                stack_table = pd.concat([stack_table, df], ignore_index=True)
-                
-        except Exception as e:
-            print(f"Warning: Could not process {file_path}: {e}")
-            continue
-    
-    if stack_table is None or stack_table.empty:
-        print("No valid data found in input files")
+    if not assembly_files:
+        print(f"No assembly summary files found in {input_dir}")
         return
     
-    # Extract sample number from sample_ID and sort
-    if "sample_ID" in stack_table.columns:
+    print(f"Found {len(assembly_files)} assembly summary files")
+    
+    # List to store all dataframes
+    all_dfs = []
+    
+    for file_path in assembly_files:
         try:
-            # Handle different sample ID formats
-            def extract_sample_num(sample_id):
-                if "_" in str(sample_id):
-                    parts = str(sample_id).split("_")
-                    # Try to find a numeric part
-                    for part in reversed(parts):
-                        if part.isdigit():
-                            return int(part)
-                    return 0
-                else:
-                    return 0
-                    
-            stack_table["sample_num"] = stack_table["sample_ID"].apply(extract_sample_num)
-            stack_table_sort = stack_table.sort_values(by=["sample_num"])
+            # Read the TSV file
+            df = pd.read_csv(file_path, sep='\t')
+            
+            # Extract sample name from file path
+            sample_name = os.path.basename(os.path.dirname(file_path))
+            
+            print(f"Processing {sample_name}: {len(df)} viral detections")
+            
+            # Add sample name for merging
+            df['sample_name'] = sample_name
+            
+            # Add the dataframe to our list
+            all_dfs.append(df)
+            
         except Exception as e:
-            print(f"Warning: Could not sort by sample number: {e}")
-            stack_table_sort = stack_table
-    else:
-        stack_table_sort = stack_table
+            print(f"Error processing {file_path}: {e}")
+            continue
     
-    # Create deduplicated table with unique accessions
-    dedup_columns = ['accession', 'sequence_name', 'taxid', 'kingdom', 'phylum',
-                     'class', 'order', 'family', 'genus', 'species']
+    if not all_dfs:
+        print("No valid assembly summary files could be processed")
+        return
     
-    # Only use columns that exist in the data
-    available_columns = [col for col in dedup_columns if col in stack_table.columns]
+    # Concatenate all dataframes
+    all_data = pd.concat(all_dfs, ignore_index=True)
     
-    if 'accession' in stack_table.columns:
-        dereplicate_table = stack_table.drop_duplicates(subset=["accession"])[available_columns]
-        
-        # Create wide format table if possible
-        if "sample_ID" in stack_table.columns and "RPKMF" in stack_table.columns:
-            try:
-                # Sort samples by sample number
-                sample_order = sorted(stack_table["sample_ID"].unique(), 
-                                    key=lambda x: extract_sample_num(x))
-                
-                # Create pivot table
-                wide_table = stack_table_sort.pivot_table(
-                    index="accession", 
-                    columns="sample_ID", 
-                    values="RPKMF", 
-                    fill_value=0
-                )
-                
-                # Reorder columns
-                wide_table = wide_table[sample_order] if set(sample_order).issubset(wide_table.columns) else wide_table
-                
-                # Merge with dereplicate table
-                merge_table = pd.merge(dereplicate_table, wide_table, 
-                                     left_on="accession", right_on="accession", how="left")
-            except Exception as e:
-                print(f"Warning: Could not create wide format table: {e}")
-                merge_table = dereplicate_table
+    print(f"Total data shape: {all_data.shape}")
+    print(f"Total viral detections across all samples: {len(all_data)}")
+    print(f"Unique assemblies: {len(all_data['Assembly'].unique())}")
+    
+    # Create pivot table: Assembly as rows, samples as columns for RPKMF values
+    # First, get the metadata columns (taxonomic info, etc.) for each assembly
+    metadata_cols = ['Asm_length', 'kingdom', 'phylum', 'tclass', 'order', 
+                     'family', 'genus', 'species', 'subspecies', 'Accession', 'Segment']
+    
+    # Get unique assembly metadata (take first occurrence of each assembly)
+    assembly_metadata = all_data.groupby('Assembly')[metadata_cols].first().reset_index()
+    
+    # Create pivot table for RPKMF values
+    rpkmf_pivot = all_data.pivot_table(
+        index='Assembly', 
+        columns='sample_name', 
+        values='RPKMF', 
+        fill_value=0
+    ).reset_index()
+    
+    # Merge metadata with RPKMF pivot table
+    merged_table = pd.merge(assembly_metadata, rpkmf_pivot, on='Assembly', how='left')
+    
+    # Reorder columns: metadata first, then sample RPKMF columns
+    all_metadata_cols = ['Assembly'] + metadata_cols
+    sample_columns = [col for col in merged_table.columns if col not in all_metadata_cols]
+    
+    # Sort sample columns numerically by extracting the number at the end
+    def extract_number(sample_name):
+        import re
+        # Extract number from end of sample name (e.g., VIR_GYG_1 -> 1, VIR_C_JY_46 -> 46)
+        match = re.search(r'_(\d+)$', sample_name)
+        if match:
+            return int(match.group(1))
         else:
-            merge_table = dereplicate_table
-    else:
-        merge_table = stack_table_sort
+            return 999999  # Put samples without numbers at the end
     
-    # Save results to Excel file
-    try:
-        with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
-            if 'merge_table' in locals():
-                merge_table.to_excel(writer, sheet_name="merge_table", index=False)
-            stack_table_sort.to_excel(writer, sheet_name="stack_table", index=False)
-        
-        print(f"Results saved to: {output_file}")
-        print(f"Total samples processed: {len(input_files)}")
-        print(f"Total rows in combined data: {len(stack_table_sort)}")
-        
-    except Exception as e:
-        print(f"Error saving Excel file: {e}")
-        # Save as CSV backup
-        csv_file = output_file.replace('.xlsx', '_backup.csv')
-        stack_table_sort.to_csv(csv_file, index=False)
-        print(f"Saved backup CSV to: {csv_file}")
+    sample_columns_sorted = sorted(sample_columns, key=extract_number)
+    final_columns = all_metadata_cols + sample_columns_sorted
+    merged_table = merged_table[final_columns]
+    
+    print(f"Final merged table shape: {merged_table.shape}")
+    print(f"Columns: {list(merged_table.columns)}")
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    
+    # Save merged table to TSV
+    merged_table.to_csv(output_file, sep='\t', index=False)
+    
+    print(f"Merged results saved to: {output_file}")
+    print(f"Table contains {len(merged_table)} unique viral assemblies across {len(sample_columns)} samples")
+
+def main():
+    parser = argparse.ArgumentParser(description='Merge EsViritu assembly summary results from all samples')
+    parser.add_argument('--input-dir', required=True, help='Directory containing sample subdirectories with EsViritu results')
+    parser.add_argument('--output', required=True, help='Output Excel file path')
+    
+    args = parser.parse_args()
+    
+    merge_esviritu_results(args.input_dir, args.output)
 
 if __name__ == "__main__":
-    # Get input files from Snakemake
-    input_files = snakemake.input.results
-    output_file = snakemake.output.merged
-    
-    merge_esviritu_results(input_files, output_file)
+    main()

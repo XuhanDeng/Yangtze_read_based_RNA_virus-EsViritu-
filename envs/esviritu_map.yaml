@@ -1,0 +1,6 @@
+name: esviritu_map
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - esviritu

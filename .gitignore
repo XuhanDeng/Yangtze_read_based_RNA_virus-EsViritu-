@@ -38,6 +38,7 @@ Thumbs.db
 # Logs
 *.log
 logs/
+log/
 
 # Output files (use output/ directory instead)
 *.csv
@@ -49,6 +50,18 @@ results/
 # Snakemake specific
 .snakemake/
 *.snakemake.lock
+
+# Pipeline data / large artifacts (not tracked)
+RNA_rawdata/
+input/
+database/
+dag.pdf
+*.drawio
+
+# Backup / alternate workflow files
+Snakefile_8_7back
+Snakefile_cluster_all
+Snakefile_test.smk
 
 # Bioinformatics files
 *.fasta

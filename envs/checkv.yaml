@@ -1,0 +1,10 @@
+name: checkv
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+  - https://repo.anaconda.com/pkgs/main
+  - https://repo.anaconda.com/pkgs/r
+dependencies:
+  - checkv=1.0.3
+  - blast=2.12.0

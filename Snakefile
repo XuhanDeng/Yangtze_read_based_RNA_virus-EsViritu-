@@ -5,94 +5,49 @@ RNA virus bioinformatics pipeline for processing RNA NGS sequencing data
 """
 
 # Configuration
-configfile: "config/config.yaml"
+configfile: "config/config_server/config_read.yaml"
+
+
+# Helper to build optional CLI args for Ref_cluster_select.py
+def build_ref_cluster_args(cfg):
+    params = cfg.get("ref_cluster_select", {})
+    args = []
+    db_id_col = params.get("db_id_col")
+    if db_id_col:
+        args += ["--db-id-col", str(db_id_col)]
+    sample_order = params.get("sample_order")
+    if sample_order:
+        args += ["--sample-order", str(sample_order)]
+    sample_order_file = params.get("sample_order_file")
+    if sample_order_file:
+        args += ["--sample-order-file", str(sample_order_file)]
+    if params.get("with_cluster_id"):
+        args.append("--with-cluster-id")
+    return " ".join(args)
+
+REF_CLUSTER_ARGS = build_ref_cluster_args(config)
 
 
 # Final output rule
-rule all:  
-    '''
-    Complete pipeline targets (commented out intermediate steps):
-    
-    # Step 1: Quality control
-        expand("results/1_fastp/{sample}/{sample}_1P.fq.gz", sample=config["samples"]),
-        expand("results/1_fastp/{sample}/{sample}_2P.fq.gz", sample=config["samples"]),
-    
-    # Step 2: rRNA removal
-        expand("results/2_ribodetector/{sample}/{sample}_nonrrna.1.fq.gz", sample=config["samples"]),
-        expand("results/2_ribodetector/{sample}/{sample}_nonrrna.2.fq.gz", sample=config["samples"]),
-        # Step 3: Assembly
-        expand("results/3_spades/{sample}/scaffolds.fasta", sample=config["samples"]),
-        expand("results/3_spades/{sample}/contigs.fasta", sample=config["samples"]),
-    
-    # Step 4: Reformat assemblies
-        expand("results/4_reformat/{sample}_reformat.fasta", sample=config["samples"]),
-
-
-
-    # Step 5: EsViritu identification
-        expand("results/5_esviritu/{sample}/{sample}.detected_virus.info.tsv", sample=config["samples"]),
-    # Final outputs only - Snakemake automatically resolves dependencies
-        "results/7_merged/esviritu_VIR_table.xlsx"
-            '''    
+rule all:
     input:
-    # Step 6: Bowtie2 alignment
-        expand("results/6_bowtie2/reduntant/2_bowtie2_alignment_bam/{sample}.bam", sample=config["samples"]),
-    # Step 7: CoverM analysis
-        expand("results/6_bowtie2/reduntant/3_coverm/count/{sample}/{sample}.count.tsv", sample=config["samples"]),
-        expand("results/6_bowtie2/reduntant/3_coverm/coverage/{sample}/{sample}.coverage.tsv", sample=config["samples"]),
-        expand("results/6_bowtie2/reduntant/3_coverm/tpm/{sample}/{sample}.tpm.tsv", sample=config["samples"]),
-    # Step 8: Merge CoverM results
-        "results/6_bowtie2/redundant/merged_comprehensive_table.tsv",
-    # Step 9: Convert count to RPKMF
-        "results/8_rpkmf_prep/merged_rpkmf_with_reference_table.tsv",
+        "results/6_esviritu/databases/final_merged_database_only_assembly/virus_pathogen_database.all_metadata.tsv",
+        "results/6_esviritu/databases/final_merged_database_only_assembly/virus_pathogen_database.fna",
+        "results/6_esviritu/databases/final_merged_database_only_assembly/virus_pathogen_database.mmi",
+        expand("results/6_esviritu/es/first_filter/{sample}/{sample}.detected_virus.assembly_summary.tsv", sample=config["samples"]),
+        expand("results/6_esviritu/es/second_filter/{sample}/{sample}.detected_virus.assembly_summary.tsv", sample=config["samples"]),
+        expand("results/6_esviritu/es/Merge/{sample}/{sample}.detected_virus.assembly_summary.merged.rpkmf.tsv", sample=config["samples"]),
+        "results/6_esviritu/es/Merge/all_samples.detected_virus.assembly_summary.rpkmf.tsv",
+        "results/6_esviritu/es/Correlation/all_samples.subspecies.min10.tsv",
+        "results/6_esviritu/es/Correlation/all_samples.subspecies.spearman.all.tsv",
+        "results/6_esviritu/es/Correlation/all_samples.subspecies.spearman.filtered.tsv",
 
-
-# Rule 0: Download EsViritu database (runs only once)
-rule download_esviritu_database:
-    output:
-        db_flag = "databases/esviritu_DB/v3.1.1/database.ready"
-    conda:
-        "envs/esviritu.yaml"
-    resources:
-        mem_mb_per_cpu = config["regular_memory"],  # MB
-        runtime = 60,  # minutes
-        cpus_per_task = 1,
-        slurm_partition = config["regular_partition"],
-        slurm_account = config["account"]
-    log:
-        out="log/0_database/esviritu_db_download.log",
-        err="log/0_database/esviritu_db_download.err"
-    shell:
-        """
-        # Create directories
-        mkdir -p databases/esviritu_DB
-        mkdir -p log/0_database
-        cd databases/esviritu_DB
-        
-        # Download database (~400 MB)
-        echo "Downloading EsViritu database (v3.1.1, ~400 MB)..." > ../../{log.out}
-        wget https://zenodo.org/records/15723755/files/esviritu_db_v3.1.1.tar.gz 2>> ../../{log.err}
-        
-        # Extract database
-        echo "Extracting database..." >> ../../{log.out}
-        tar -xvf esviritu_db_v3.1.1.tar.gz >> ../../{log.out} 2>> ../../{log.err}
-        
-        # Clean up
-        echo "Cleaning up..." >> ../../{log.out}
-        rm esviritu_db_v3.1.1.tar.gz
-        
-        # Create flag file to indicate completion
-        touch v3.1.1/database.ready
-        echo "Database setup complete!" >> ../../{log.out}
-        echo "Database location: $(pwd)/v3.1.1" >> ../../{log.out}
-        """
-
-'''
 # Rule 1: Quality control and adapter removal with fastp
+# Note: fastp step already completed for current samples; outputs are in results/1_fastp/.
 rule fastp_qc:
     input:
-        r1 = "input/{sample}.R1.fq.gz",
-        r2 = "input/{sample}.R2.fq.gz"
+        r1 = "RNA_rawdata/{sample}/{sample}.R1.fq.gz",
+        r2 = "RNA_rawdata/{sample}/{sample}.R2.fq.gz"
     output:
         r1_paired="results/1_fastp/{sample}/{sample}_1P.fq.gz",
         r2_paired="results/1_fastp/{sample}/{sample}_2P.fq.gz",
@@ -124,7 +79,7 @@ rule fastp_qc:
               --length_required {config[fastp][length_required]} \
               --dont_overwrite > {log.out} 1> {log.err}  # Redirect stderr to log file
         """
-'''
+
 # Rule 2: Remove rRNA sequences with ribodetector
 rule ribodetector_rrna_removal:
     input:
@@ -154,312 +109,588 @@ rule ribodetector_rrna_removal:
                          --chunk_size {config[ribodetector][chunk_size]} \
                          -o {output.r1_nonrrna} {output.r2_nonrrna} > {log.out} 1> {log.err}
         """
-
-# Rule 5: Read-based viral identification with EsViritu
-rule esviritu_identification:
+#Step 3: Assembly with SPAdes
+rule spades_assembly:
     input:
-        r1 = "results/2_ribodetector/{sample}/{sample}_nonrrna.1.fq.gz",
-        r2 = "results/2_ribodetector/{sample}/{sample}_nonrrna.2.fq.gz",
-        db_flag = "databases/esviritu_DB/v3.1.1/database.ready"
+        r1="results/2_ribodetector/{sample}/{sample}_nonrrna.1.fq.gz",
+        r2="results/2_ribodetector/{sample}/{sample}_nonrrna.2.fq.gz"
     output:
-        results = "results/5_esviritu_merge/{sample}.done"
-    conda:
-        "envs/esviritu.yaml"
-    resources:
-        mem_mb_per_cpu = config["regular_memory"],  # MB
-        runtime = config["esviritu"]["runtime"],
-        cpus_per_task = config["esviritu"]["threads"],
-        slurm_partition = config["regular_partition"],
-        slurm_account = config["account"]
+        scaffolds="results/4_spades_result/{sample}/{sample}_no_correction/scaffolds.fasta"
+    conda: "envs/spades.yaml"
     log:
-        out="log/5_esviritu/{sample}.log",
-        err="log/5_esviritu/{sample}.err"
+        out="log/4_spades_assembly/{sample}_spades_assembly.log",
+        err="log/4_spades_assembly/{sample}_spades_assembly.err"
+    threads: config["spades"]["threads"]
+    resources:
+        slurm_partition=config["spades"]["spade_partition"],
+        runtime=config["runtime"],
+        mem_mb_per_cpu=int(config["spades"]["spade_memory"]),
+        cpus_per_task=config["spades"]["threads"],
+        slurm_account=config["slurm_account"]
+    params:
+        memory=lambda wildcards, resources: int(
+            resources.mem_mb_per_cpu * resources.cpus_per_task / 1024
+        ),
+        k_list=config["spades"]["k_values"]
     shell:
         """
-        mkdir -p results/5_esviritu_merge
-        EsViritu -r {input.r1} {input.r2} \
+        mkdir -p results/4_spades_result/{wildcards.sample}
+        mkdir -p log/4_spades_assembly
+        spades.py --meta \
+            -o results/4_spades_result/{wildcards.sample}/{wildcards.sample}_no_correction \
+            -1 {input.r1} -2 {input.r2} \
+            -t {threads} -m {params.memory} \
+            -k {params.k_list} \
+            --only-assembler \
+            > {log.out} 2> {log.err}
+        """
+
+# Step 4: Rename and filter assemblies
+rule rename_filter_assemblies:
+    input:
+        scaffolds="results/4_spades_result/{sample}/{sample}_no_correction/scaffolds.fasta"
+    output:
+        renamed=f"results/5_rename_assembly/rename_{config['seqkit']['min_length']}/{{sample}}_scaffolds_rename_{config['seqkit']['min_length']}.fasta"
+    conda: "envs/seqkit.yaml"
+    log:
+        out="log/5_rename_filter/{sample}_rename_filter.log",
+        err="log/5_rename_filter/{sample}_rename_filter.err"
+    threads: config["seqkit"]["threads"]
+    resources:
+        slurm_partition=config["regular_partition"],
+        runtime=config["runtime"],
+        mem_mb_per_cpu=config["regular_memory"],
+        cpus_per_task=config["seqkit"]["threads"],
+        slurm_account=config["slurm_account"]
+    params:
+        min_length=config["seqkit"]["min_length"],
+        nr_width=config["seqkit"]["nr_width"]
+    shell:
+        """
+        mkdir -p results/5_rename_assembly/rename_{params.min_length}
+        mkdir -p log/5_rename_filter
+
+
+        # Filter sequences >= min_length and rename
+        seqkit seq -m {params.min_length} {input.scaffolds} 2>> {log.err} | \
+        seqkit replace -p .+ -r "{wildcards.sample}_{{nr}}" --nr-width {params.nr_width} \
+        -o {output.renamed} \
+        > {log.out} 2>> {log.err}
+        """
+# Step5.1 Merge with Esviritu database_just_merge
+# Esviritu is a tool for identifying viral sequences from metagenomic data. however, After I try to mapping my filtered sequencing data to Esvirtu database, I found very few reads can be mapped to the database. So I decide to enlarge the database by merging established Esviritu database with my assembled contigs from metaspades. The minimum contig length is set to 200bp to ensure quality. which aligns with the Esviritu database construction criteria. for this step i just use seqkit to filter and cat all database together.
+
+rule merge_esviritu_database_1:
+    input:
+        contigs = expand(
+            f"results/5_rename_assembly/rename_{config['seqkit']['min_length']}/{{sample}}_scaffolds_rename_{config['seqkit']['min_length']}.fasta",
+            sample=config["samples"],
+        )
+    output:
+        merged_db = "results/6_esviritu/databases/database_merged_only_assembly/esviritu_merged_db_only_assembly.fasta"
+    conda:
+        "envs/seqkit.yaml"
+    resources:
+        mem_mb_per_cpu = config["regular_memory"],  # MB
+        runtime = config["merge_esviritu_database_1"]["runtime"],  # minutes
+        cpus_per_task = config["merge_esviritu_database_1"]["threads"],
+        slurm_partition = config["regular_partition"],
+        slurm_account = config["account"]
+    params:
+        min_length = config["merge_esviritu_database_1"]["min_length"]
+    log:
+        out="log/merge_esviritu_database/merge_esviritu_database_only_assembly_1.log",
+        err="log/merge_esviritu_database/merge_esviritu_database_only_assembly_1.err"
+    shell:
+        """
+        mkdir -p results/6_esviritu/databases/database_merged_only_assembly
+        rm -f {output.merged_db}
+        seqkit seq -m {params.min_length} {input.contigs} >> {output.merged_db}
+        """
+
+
+# # Merge with Esviritu database_step2/if have too much viral cluster
+# # NOTE: Previously clustered with CheckV (BLAST + anicalc.py + aniclust.py).
+# # Current strategy: mmseqs2 easy-cluster on nucleotide FASTA.
+# # Step 15b: Cluster all samples using mmseqs2 method
+# rule merge_esviritu_database_2:
+#     input:
+#         merged_db="results/6_esviritu/databases/database_merged/esviritu_merged_db.fasta"
+#     output:
+#         cluster_rep="results/6_esviritu/databases/cluster/all_samples_cluster_rep_seq.fasta",
+#         cluster_all="results/6_esviritu/databases/cluster/all_samples_cluster_all_seqs.fasta",
+#         cluster_tsv="results/6_esviritu/databases/cluster/all_samples_cluster.tsv"
+#     conda: "envs/mmseqs2.yaml"
+#     threads: config["mmseqs2"]["threads"]
+#     log:
+#         out="log/6_esviritu/mmseqs2_cluster.log",
+#         err="log/6_esviritu/mmseqs2_cluster.err"
+#     resources:
+#         slurm_partition=config["regular_partition"],
+#         runtime = config["mmseqs2"]["runtime"],
+#         mem_mb_per_cpu = config["regular_memory"],
+#         cpus_per_task = config["mmseqs2"]["threads"],
+#         slurm_account = config["slurm_account"]
+#     params:
+#         min_seq_id=config["mmseqs2"]["min_seq_id"],
+#         coverage=config["mmseqs2"]["coverage"],
+#         tmp_dir="results/6_esviritu/databases/cluster/tmp",
+#         prefix=config["mmseqs2"]["prefix"],
+#         memory=config["regular_memory"]
+#     shell:
+#         """
+#         mkdir -p results/6_esviritu/databases/cluster
+#         mkdir -p log/6_esviritu
+#         mkdir -p {params.tmp_dir}
+
+#         # mmseqs2 easy-cluster on nucleotide FASTA
+#         mmseqs easy-cluster {input.merged_db} \
+#             {params.prefix} \
+#             {params.tmp_dir} \
+#             --min-seq-id {params.min_seq_id} \
+#             -c {params.coverage} \
+#             --threads {threads} > {log.out} 2> {log.err}
+#         """
+
+# Previous CheckV-based clustering strategy (kept for reference)
+rule merge_esviritu_database_2_checkv:
+    input:
+        merged_db="results/6_esviritu/databases/database_merged_only_assembly/esviritu_merged_db_only_assembly.fasta"
+    output:
+        blast_db=directory("results/6_esviritu/databases/cluster_only_assembly/blast_db"),
+        blast_results="results/6_esviritu/databases/cluster_only_assembly/all_samples_blast.tsv",
+        ani_results="results/6_esviritu/databases/cluster_only_assembly/all_samples_ani.tsv",
+        cluster_results="results/6_esviritu/databases/cluster_only_assembly/all_samples_cluster.tsv"
+    conda: "envs/checkv.yaml"
+    threads: config["checkv"]["threads"]
+    log:
+        out="log/6_esviritu/cluster_all.log",
+        err="log/6_esviritu/cluster_all.err"
+    resources:
+        slurm_partition=config["checkv"]["slurm_partition"],
+        runtime = config["checkv"]["runtime"],
+        mem_mb_per_cpu = config["checkv"]["mem_mb_per_cpu"],
+        cpus_per_task = config["checkv"]["threads"],
+        slurm_account = config["slurm_account"]
+    shell:
+        """
+        mkdir -p results/6_esviritu/databases/cluster_only_assembly
+        mkdir -p log/6_esviritu
+
+        # Create BLAST database
+        makeblastdb -in {input.merged_db} \
+            -dbtype nucl \
+            -out results/6_esviritu/databases/cluster_only_assembly/all_samples_db \
+            >> {log.out} 2>> {log.err}
+
+        # Run BLAST all-vs-all
+        blastn -query {input.merged_db} \
+            -db results/6_esviritu/databases/cluster_only_assembly/all_samples_db \
+            -outfmt '6 std qlen slen' \
+            -max_target_seqs 1000 \
+            -out {output.blast_results} \
+            -num_threads {threads} \
+            >> {log.out} 2>> {log.err}
+
+        # Calculate ANI
+        python {config[scripts][checkv_ani]} \
+            -i {output.blast_results} \
+            -o {output.ani_results} \
+            >> {log.out} 2>> {log.err}
+
+        # Cluster sequences
+        python {config[scripts][checkv_clust]} \
+            --fna {input.merged_db} \
+            --ani {output.ani_results} \
+            --out {output.cluster_results} \
+            --min_ani {config[checkv][min_ani]} \
+            --min_tcov {config[checkv][min_coverage]} \
+            --min_qcov {config[checkv][min_qcov]} \
+            >> {log.out} 2>> {log.err}
+
+        # Create directory for blast database files
+        mkdir -p {output.blast_db}
+        mv results/6_esviritu/databases/cluster_only_assembly/all_samples_db.* {output.blast_db}/
+        """
+
+
+# Select representative sequences from each cluster
+rule select_cluster_representatives:
+    input:
+        cluster="results/6_esviritu/databases/cluster_only_assembly/all_samples_cluster.tsv",
+    output:
+        reps="results/6_esviritu/databases/cluster_only_assembly/cluster_representatives.txt",
+    conda:
+        "envs/python.yaml"
+    threads: 4
+    resources:
+        slurm_partition=config["regular_partition"],
+        runtime=config["runtime"],
+        mem_mb_per_cpu=config["regular_memory"],
+        cpus_per_task=4,
+        slurm_account=config["slurm_account"]
+    log:
+        out="log/6_esviritu/cluster_representatives.log",
+        err="log/6_esviritu/cluster_representatives.err",
+    shell:
+        """
+        mkdir -p log/6_esviritu
+        python {config[scripts][ref_cluster_select_assembly_only]} \
+            --cluster {input.cluster} \
+            --output {output.reps} \
+            {REF_CLUSTER_ARGS} \
+            > {log.out} 2> {log.err}
+        """
+
+rule extract_final_virus_pathogen_database:
+    input:
+        reps="results/6_esviritu/databases/cluster_only_assembly/cluster_representatives.txt",
+        fasta="results/6_esviritu/databases/database_merged_only_assembly/esviritu_merged_db_only_assembly.fasta",
+    output:
+        fasta="results/6_esviritu/databases/final_merged_database_only_assembly/virus_pathogen_database.fna",
+    conda:
+        "envs/seqkit.yaml"
+    threads: config["seqkit"]["threads"]
+    resources:
+        slurm_partition=config["regular_partition"],
+        runtime=config["runtime"],
+        mem_mb_per_cpu=config["regular_memory"],
+        cpus_per_task=config["seqkit"]["threads"],
+        slurm_account=config["slurm_account"]
+    log:
+        out="log/6_esviritu/extract_final_db.log",
+        err="log/6_esviritu/extract_final_db.err"
+    shell:
+        """
+        mkdir -p results/6_esviritu/databases/final_merged_database_only_assembly
+        mkdir -p log/6_esviritu
+        seqkit grep -f {input.reps} {input.fasta} -o {output.fasta} \
+            > {log.out} 2> {log.err}
+        """
+
+rule index_final_virus_pathogen_database:
+    input:
+        fasta="results/6_esviritu/databases/final_merged_database_only_assembly/virus_pathogen_database.fna",
+    output:
+        mmi="results/6_esviritu/databases/final_merged_database_only_assembly/virus_pathogen_database.mmi",
+    conda:
+        "envs/minimap2.yaml"
+    threads: 4
+    resources:
+        slurm_partition=config["regular_partition"],
+        runtime=config["runtime"],
+        mem_mb_per_cpu=config["regular_memory"],
+        cpus_per_task=4,
+        slurm_account=config["slurm_account"]
+    log:
+        out="log/6_esviritu/minimap2_index.log",
+        err="log/6_esviritu/minimap2_index.err"
+    shell:
+        """
+        mkdir -p results/6_esviritu/databases/final_merged_database_only_assembly
+        mkdir -p log/6_esviritu
+        minimap2 -d {output.mmi} {input.fasta} \
+            > {log.out} 2> {log.err}
+        """
+
+rule seqkit_length_from_merged_db:
+    input:
+        fasta="results/6_esviritu/databases/database_merged_only_assembly/esviritu_merged_db_only_assembly.fasta",
+    output:
+        length="results/6_esviritu/databases/final_merged_database_only_assembly/length.txt",
+    conda:
+        "envs/seqkit.yaml"
+    threads: config["seqkit"]["threads"]
+    resources:
+        slurm_partition=config["regular_partition"],
+        runtime=config["runtime"],
+        mem_mb_per_cpu=config["regular_memory"],
+        cpus_per_task=config["seqkit"]["threads"],
+        slurm_account=config["slurm_account"]
+    log:
+        out="log/6_esviritu/seqkit_length.log",
+        err="log/6_esviritu/seqkit_length.err"
+    shell:
+        """
+        mkdir -p results/6_esviritu/databases/final_merged_database_only_assembly
+        mkdir -p log/6_esviritu
+        seqkit fx2tab -n -l {input.fasta} > {output.length} \
+            2> {log.err}
+        """
+
+rule merge_esviritu_metadata:
+    input:
+        id_length="results/6_esviritu/databases/final_merged_database_only_assembly/length.txt",
+        ids="results/6_esviritu/databases/cluster_only_assembly/cluster_representatives.txt",
+        fasta="results/6_esviritu/databases/database_merged_only_assembly/esviritu_merged_db_only_assembly.fasta",
+    output:
+        merged="results/6_esviritu/databases/final_merged_database_only_assembly/virus_pathogen_database.all_metadata.tsv",
+    conda:
+        "envs/python.yaml"
+    threads: 4
+    resources:
+        slurm_partition=config["regular_partition"],
+        runtime=config["runtime"],
+        mem_mb_per_cpu=config["regular_memory"],
+        cpus_per_task=4,
+        slurm_account=config["slurm_account"]
+    log:
+        out="log/6_esviritu/merge_metadata.log",
+        err="log/6_esviritu/merge_metadata.err"
+    shell:
+        """
+        mkdir -p results/6_esviritu/databases/final_merged_database_only_assembly
+        mkdir -p log/6_esviritu
+        python {config[scripts][merge_es_tsv_assembly_only]} \
+            --id-length {input.id_length} \
+            --ids {input.ids} \
+            --fasta {input.fasta} \
+            --output {output.merged} \
+            > {log.out} 2> {log.err}
+        """
+
+
+
+rule esviritu_mapped_to_standard_database:
+    input:
+        r1="results/2_ribodetector/{sample}/{sample}_nonrrna.1.fq.gz",
+        r2="results/2_ribodetector/{sample}/{sample}_nonrrna.2.fq.gz",
+        db_dir=config["databases"]["esviritu_db_v3.2.4"],
+    output:
+        assembly_summary="results/6_esviritu/es/first_filter/{sample}/{sample}.detected_virus.assembly_summary.tsv",
+        info="results/6_esviritu/es/first_filter/{sample}/{sample}.detected_virus.info.tsv",
+        consensus="results/6_esviritu/es/first_filter/{sample}/{sample}_final_consensus.fasta",
+        coverage="results/6_esviritu/es/first_filter/{sample}/{sample}.virus_coverage_windows.tsv",
+        log_file="results/6_esviritu/es/first_filter/{sample}/{sample}_esviritu.log",
+        params="results/6_esviritu/es/first_filter/{sample}/{sample}_esviritu.params.yaml",
+        tagged_r1="results/6_esviritu/es/first_filter/{sample}/{sample}_nonrrna.1.tagged.fq.gz",
+        tagged_r2="results/6_esviritu/es/first_filter/{sample}/{sample}_nonrrna.2.tagged.fq.gz",
+        mapped_reads="results/6_esviritu/es/first_filter/{sample}/{sample}_temp/{sample}.reads.txt",
+    conda:
+        "envs/esviritu_map.yaml"
+    threads: config["esviritu_map"]["threads"]
+    resources:
+        mem_mb_per_cpu=config["regular_memory"],
+        runtime=config["esviritu_map"]["runtime"],
+        cpus_per_task=config["esviritu_map"]["threads"],
+        slurm_partition=config["regular_partition"],
+        slurm_account=config["account"]
+    params:
+        temp_dir="results/6_esviritu/es/first_filter/{sample}/{sample}_temp",
+        third_bam="results/6_esviritu/es/first_filter/{sample}/{sample}_temp/{sample}.third.filt.sorted.bam",
+    log:
+        out="log/6_esviritu/first_filter/{sample}.log",
+        err="log/6_esviritu/first_filter/{sample}.err"
+    shell:
+        """
+        mkdir -p results/6_esviritu/es/first_filter/{wildcards.sample}
+        mkdir -p log/6_esviritu/first_filter
+        zcat {input.r1} | gawk 'NR%4==1{{ $0=gensub(/^@([^ ]+)/, "@\\\\1_1", 1) }} {{ print }}' | gzip > {output.tagged_r1}
+        zcat {input.r2} | gawk 'NR%4==1{{ $0=gensub(/^@([^ ]+)/, "@\\\\1_2", 1) }} {{ print }}' | gzip > {output.tagged_r2}
+        python {config[scripts][modified_esviritu]} -r {output.tagged_r1} {output.tagged_r2} \
                  -s {wildcards.sample} \
                  -t {threads} \
-                 -o results/5_esviritu_merge \
-                 -p {config[esviritu][mode]} > {log.out} 2>> {log.err}
-        
-        # Create completion flag
-        touch {output.results}
+                 -o results/6_esviritu/es/first_filter/{wildcards.sample} \
+                 --db {input.db_dir} \
+                 --keep True -q False \
+                 > {log.out} 2>> {log.err}
+        mkdir -p {params.temp_dir}
+        samtools view {params.third_bam} | cut -f1 | sort -u > {output.mapped_reads}
         """
 
-
-
-# Rule 7: Merge EsViritu results
-rule merge_esviritu_results:
+rule extract_unmapped_reads_esviritu:
     input:
-        results = expand("results/5_esviritu_merge/{sample}.done", sample=config["samples"])
+        r1="results/6_esviritu/es/first_filter/{sample}/{sample}_nonrrna.1.tagged.fq.gz",
+        r2="results/6_esviritu/es/first_filter/{sample}/{sample}_nonrrna.2.tagged.fq.gz",
+        mapped_reads="results/6_esviritu/es/first_filter/{sample}/{sample}_temp/{sample}.reads.txt",
     output:
-        merged = "results/7_merged/esviritu_VIR_table.xlsx"
+        unmapped_r1="results/6_esviritu/es/first_filter/{sample}/{sample}_nonrrna.1.unmapped.fq.gz",
+        unmapped_r2="results/6_esviritu/es/first_filter/{sample}/{sample}_nonrrna.2.unmapped.fq.gz",
     conda:
-        "envs/esviritu.yaml"
+        "envs/seqkit.yaml"
+    threads: config["seqkit"]["threads"]
     resources:
-        mem_mb_per_cpu = config["regular_memory"],  # MB
-        runtime = 30,  # minutes
-        cpus_per_task = 1,
-        slurm_partition = config["regular_partition"],
-        slurm_account = config["account"]
+        slurm_partition=config["regular_partition"],
+        runtime=config["runtime"],
+        mem_mb_per_cpu=config["regular_memory"],
+        cpus_per_task=config["seqkit"]["threads"],
+        slurm_account=config["slurm_account"]
     log:
-        out="log/7_merged/merge_results.log",
-        err="log/7_merged/merge_results.err"
+        out="log/6_esviritu/unmapped_reads/{sample}.log",
+        err="log/6_esviritu/unmapped_reads/{sample}.err"
     shell:
         """
-        mkdir -p results/7_merged \
-        summarize_esv_runs {input.results} \
-        touch {output.merged}   > {log.out} 2>> {log.err}
+        mkdir -p results/6_esviritu/es/first_filter/{wildcards.sample}
+        mkdir -p log/6_esviritu/unmapped_reads
+        tmp_dir=results/6_esviritu/es/first_filter/{wildcards.sample}/{wildcards.sample}_temp
+        mkdir -p $tmp_dir
+        seqkit seq -n {input.r1} > $tmp_dir/fastq_full_ids.txt
+        seqkit seq -n {input.r2} >> $tmp_dir/fastq_full_ids.txt
+        awk '
+          NR==FNR {{
+            core=$1
+            full=$0
+            map[core]=full
+            next
+          }}
+          {{
+            core=$1
+            if (core in map) print map[core]
+            else print core "\\tNOT_FOUND" > "/dev/stderr"
+          }}
+        ' $tmp_dir/fastq_full_ids.txt {input.mapped_reads} > $tmp_dir/ids.full.txt 2> {log.err}
+        seqkit grep -v -n -f $tmp_dir/ids.full.txt {input.r1} -o {output.unmapped_r1} \
+            >> {log.out} 2>> {log.err}
+        seqkit grep -v -n -f $tmp_dir/ids.full.txt {input.r2} -o {output.unmapped_r2} \
+            >> {log.out} 2>> {log.err}
         """
 
-#Rule 8: establish bowtie2 reference database
-rule bowtie2_database:
+rule esviritu_mapped_to_assembly_database:
     input:
-        db_flag = config["databases"]["ncbi_vir_reduntant"]
+        r1="results/6_esviritu/es/first_filter/{sample}/{sample}_nonrrna.1.unmapped.fq.gz",
+        r2="results/6_esviritu/es/first_filter/{sample}/{sample}_nonrrna.2.unmapped.fq.gz",
+        db_dir="results/6_esviritu/databases/final_merged_database_only_assembly",
     output:
-        ncbi_vir_reduntant_index = "results/6_bowtie2/reduntant/reduntant_index.done"
-    conda:"envs/bowtie2_samtools.yaml"
-    log:
-        out="log/6_bowtie2/reduntant/bowtie2_database_index_redudant.log",
-        err="log/6_bowtie2/reduntant/bowtie2_database_index_redudant.err"
-    resources:
-        mem_mb_per_cpu = config["regular_memory"],  # MB
-        runtime = 60,  # minutes
-        cpus_per_task = 8,
-        slurm_partition = config["regular_partition"],
-        slurm_account = config["account"]
-    shell:
-        """
-        mkdir -p results/6_bowtie2/reduntant/reduntant_index
-        bowtie2-build {input.db_flag} \
-                     results/6_bowtie2/reduntant/reduntant_index/ncbi_vir_reduntant_index \
-                      --threads {resources.cpus_per_task} > {log.out} 2> {log.err}
-        touch {output.ncbi_vir_reduntant_index}
-        echo "Bowtie2 index for NCBI redundant database created successfully."
-        """ 
-#Rule 9 :very_sensitive bowtie2 to reduntant
-rule bowtie2_very_sensitive:
-    input:
-        r1 = "results/2_ribodetector/{sample}/{sample}_nonrrna.1.fq.gz",
-        r2 = "results/2_ribodetector/{sample}/{sample}_nonrrna.2.fq.gz",
-        db_index = "results/6_bowtie2/reduntant/reduntant_index.done"
-    output:
-        sam = temp("results/6_bowtie2/reduntant/1_bam_file/{sample}.sam"),
-        bam = "results/6_bowtie2/reduntant/2_bowtie2_alignment_bam/{sample}.bam"
+        assembly_summary="results/6_esviritu/es/second_filter/{sample}/{sample}.detected_virus.assembly_summary.tsv",
+        info="results/6_esviritu/es/second_filter/{sample}/{sample}.detected_virus.info.tsv",
+        consensus="results/6_esviritu/es/second_filter/{sample}/{sample}_final_consensus.fasta",
+        coverage="results/6_esviritu/es/second_filter/{sample}/{sample}.virus_coverage_windows.tsv",
+        log_file="results/6_esviritu/es/second_filter/{sample}/{sample}_esviritu.log",
+        params="results/6_esviritu/es/second_filter/{sample}/{sample}_esviritu.params.yaml",
     conda:
-        "envs/bowtie2_samtools.yaml"
+        "envs/esviritu_map.yaml"
+    threads: config["esviritu_map"]["threads"]
     resources:
-        mem_mb_per_cpu = config["regular_memory"],  # MB
-        runtime = config["bowtie2_reduntant"]["runtime"],
-        cpus_per_task = config["bowtie2_reduntant"]["threads"],
-        slurm_partition = config["regular_partition"],
-        slurm_account = config["account"]
+        mem_mb_per_cpu=config["regular_memory"],
+        runtime=config["esviritu_map"]["runtime"],
+        cpus_per_task=config["esviritu_map"]["threads"],
+        slurm_partition=config["regular_partition"],
+        slurm_account=config["account"]
+    params:
+        extra=config["esviritu_map"].get("extra", "")
     log:
-        out="log/6_bowtie2/reduntant/alignment_{sample}.log",
-        err="log/6_bowtie2/reduntant/alignment_{sample}.err"
+        out="log/6_esviritu/second_filter/{sample}.log",
+        err="log/6_esviritu/second_filter/{sample}.err"
     shell:
         """
-        mkdir -p results/6_bowtie2/reduntant/1_bam_file results/6_bowtie2/reduntant/2_bowtie2_alignment_bam
-        bowtie2 --end-to-end --very-sensitive \
-                -x results/6_bowtie2/reduntant/reduntant_index/ncbi_vir_reduntant_index \
-                -1 {input.r1} -2 {input.r2} \
-                -S {output.sam} \
-                --threads {resources.cpus_per_task} > {log.out} 2> {log.err}
-        
-        # Samtools processing
-        samtools view -@ {resources.cpus_per_task} -hbS -f 2 {output.sam} \
-        | samtools sort -@ {resources.cpus_per_task} -o {output.bam} - \
-            >> {log.out} 2>> {log.err}
-        samtools index -@ {resources.cpus_per_task} {output.bam} \
-            >> {log.out} 2>> {log.err}
+        mkdir -p results/6_esviritu/es/second_filter/{wildcards.sample}
+        mkdir -p log/6_esviritu/second_filter
+        python {config[scripts][modified_esviritu]} -r {input.r1} {input.r2} \
+                 -s {wildcards.sample} \
+                 -t {threads} \
+                 -o results/6_esviritu/es/second_filter/{wildcards.sample} \
+                 --db {input.db_dir} -q False \
+                 {params.extra} \
+                 > {log.out} 2>> {log.err}
         """
 
-# Rule 10: coverm count/coverage/tpm   calculate
-
-rule coverm_process:
+rule merge_esviritu_assembly_summary:
     input:
-        bam = "results/6_bowtie2/reduntant/2_bowtie2_alignment_bam/{sample}.bam"
+        first="results/6_esviritu/es/first_filter/{sample}/{sample}.detected_virus.assembly_summary.tsv",
+        second="results/6_esviritu/es/second_filter/{sample}/{sample}.detected_virus.assembly_summary.tsv",
     output:
-        count_file = "results/6_bowtie2/reduntant/3_coverm/count/{sample}/{sample}.count.tsv",
-        coverage_file = "results/6_bowtie2/reduntant/3_coverm/coverage/{sample}/{sample}.coverage.tsv",
-        tpm_file = "results/6_bowtie2/reduntant/3_coverm/tpm/{sample}/{sample}.tpm.tsv"   
+        first_copy="results/6_esviritu/es/Merge/{sample}/{sample}.detected_virus.assembly_summary.first.tsv",
+        second_copy="results/6_esviritu/es/Merge/{sample}/{sample}.detected_virus.assembly_summary.second.tsv",
+        merged="results/6_esviritu/es/Merge/{sample}/{sample}.detected_virus.assembly_summary.merged.tsv",
+    resources:
+        slurm_partition=config["regular_partition"],
+        runtime=config["runtime"],
+        mem_mb_per_cpu=config["regular_memory"],
+        cpus_per_task=1,
+        slurm_account=config["slurm_account"]
+    log:
+        out="log/6_esviritu/merge_info/{sample}.log",
+        err="log/6_esviritu/merge_info/{sample}.err"
+    shell:
+        """
+        mkdir -p results/6_esviritu/es/Merge/{wildcards.sample}
+        mkdir -p log/6_esviritu/merge_info
+        cp {input.first} {output.first_copy}
+        cp {input.second} {output.second_copy}
+        cat {input.first} {input.second} > {output.merged} 2> {log.err}
+        """
+
+rule rpkmf_esviritu_assembly_summary:
+    input:
+        merged="results/6_esviritu/es/Merge/{sample}/{sample}.detected_virus.assembly_summary.merged.tsv",
+    output:
+        rpkmf="results/6_esviritu/es/Merge/{sample}/{sample}.detected_virus.assembly_summary.merged.rpkmf.tsv",
     conda:
-        "envs/coverm.yaml"
+        "envs/python.yaml"
     resources:
-        mem_mb_per_cpu = config["regular_memory"],  # MB
-        runtime = config["coverm"]["runtime"],  # minutes
-        cpus_per_task = config["coverm"]["threads"],
-        slurm_partition = config["regular_partition"],
-        slurm_account = config["account"]
+        slurm_partition=config["regular_partition"],
+        runtime=config["runtime"],
+        mem_mb_per_cpu=config["regular_memory"],
+        cpus_per_task=1,
+        slurm_account=config["slurm_account"]
     log:
-        out="log/6_bowtie2/reduntant/coverm_process_{sample}.log",
-        err="log/6_bowtie2/reduntant/coverm_process_{sample}.err"
+        out="log/6_esviritu/merge_info/{sample}.rpkmf.log",
+        err="log/6_esviritu/merge_info/{sample}.rpkmf.err"
     shell:
         """
-        mkdir -p results/6_bowtie2/reduntant/3_coverm/count/{wildcards.sample}
-        mkdir -p results/6_bowtie2/reduntant/3_coverm/coverage/{wildcards.sample}
-        mkdir -p results/6_bowtie2/reduntant/3_coverm/tpm/{wildcards.sample}
-        mkdir -p log/6_bowtie2/reduntant
-        
-        coverm contig -m count --bam-files {input.bam} \
-            --min-read-percent-identity {config[coverm][min-read-percentage-identity]} \
-            --min-read-aligned-percent {config[coverm][min-read-aligned-percent]} \
-            --output-file {output.count_file} \
-            --contig-end-exclusion {config[coverm][contig-end-exclusion]} \
-            --no-zeros -t {resources.cpus_per_task} \
-            >> {log.out} 2>> {log.err}
-           
-        coverm contig -m mean --bam-files {input.bam} \
-            --min-read-percent-identity {config[coverm][min-read-percentage-identity]} \
-            --min-read-aligned-percent {config[coverm][min-read-aligned-percent]} \
-            --output-file {output.coverage_file} \
-            --contig-end-exclusion {config[coverm][contig-end-exclusion]} \
-            --no-zeros -t {resources.cpus_per_task} \
-            >> {log.out} 2>> {log.err}
-
-        coverm contig -m tpm --bam-files {input.bam} \
-            --min-read-percent-identity {config[coverm][min-read-percentage-identity]} \
-            --min-read-aligned-percent {config[coverm][min-read-aligned-percent]} \
-            --output-file {output.tpm_file} \
-            --contig-end-exclusion {config[coverm][contig-end-exclusion]} \
-            --no-zeros -t {resources.cpus_per_task} \
-            >> {log.out} 2>> {log.err}
-            
-        echo "CoverM processing completed for {wildcards.sample}."
+        python {config[scripts][esviritu_rpkmf]} --input {input.merged} --output {output.rpkmf} \
+            > {log.out} 2> {log.err}
         """
 
-# Rule 11: Merge CoverM results across all samples
-rule merge_coverm_results:
+rule merge_esviritu_rpkmf_all_samples:
     input:
-        count_files = expand("results/6_bowtie2/reduntant/3_coverm/count/{sample}/{sample}.count.tsv", sample=config["samples"]),
-        coverage_files = expand("results/6_bowtie2/reduntant/3_coverm/coverage/{sample}/{sample}.coverage.tsv", sample=config["samples"]),
-        tpm_files = expand("results/6_bowtie2/reduntant/3_coverm/tpm/{sample}/{sample}.tpm.tsv", sample=config["samples"])
+        rpkmfs=expand(
+            "results/6_esviritu/es/Merge/{sample}/{sample}.detected_virus.assembly_summary.merged.rpkmf.tsv",
+            sample=config["samples"],
+        ),
     output:
-        merged_count = "results/6_bowtie2/redundant/merged_count_table.tsv",
-        merged_coverage = "results/6_bowtie2/redundant/merged_coverage_table.tsv", 
-        merged_tpm = "results/6_bowtie2/redundant/merged_tpm_table.tsv",
-        comprehensive = "results/6_bowtie2/redundant/merged_comprehensive_table.tsv"
+        merged="results/6_esviritu/es/Merge/all_samples.detected_virus.assembly_summary.rpkmf.tsv",
+    conda:
+        "envs/python.yaml"
     resources:
-        mem_mb_per_cpu = config["regular_memory"],  # MB
-        runtime = config["merge_coverm"]["runtime"],  # minutes
-        cpus_per_task = 1,
-        slurm_partition = config["regular_partition"],
-        slurm_account = config["account"]
+        slurm_partition=config["regular_partition"],
+        runtime=config["runtime"],
+        mem_mb_per_cpu=config["regular_memory"],
+        cpus_per_task=1,
+        slurm_account=config["slurm_account"]
     log:
-        out="log/merge_coverm_results.log",
-        err="log/merge_coverm_results.err"
+        out="log/6_esviritu/merge_info/all_samples.rpkmf.log",
+        err="log/6_esviritu/merge_info/all_samples.rpkmf.err"
     shell:
         """
-        mkdir -p {config[merge_coverm][output_dir]}
-        mkdir -p log
-        
-        python scripts/merge_coverm_results.py \
-            --input-dir {config[merge_coverm][input_dir]} \
-            --output-dir {config[merge_coverm][output_dir]} \
-            --metrics count coverage tpm \
-            --reference-csv {config[merge_coverm][reference_csv]} \
-            >> {log.out} 2>> {log.err}
-            
-        echo "CoverM results merged successfully."
+        python {config[scripts][esviritu_merge_rpkmf]} --inputs {input.rpkmfs} --output {output.merged} \
+            > {log.out} 2> {log.err}
         """
 
-# Rule 12: Count filtered reads from ribodetector output
-rule count_filtered_reads:
+rule esviritu_subspecies_correlation:
     input:
-        r1 = "results/2_ribodetector/{sample}/{sample}_nonrrna.1.fq.gz",
-        r2 = "results/2_ribodetector/{sample}/{sample}_nonrrna.2.fq.gz"
+        merged="results/6_esviritu/es/Merge/all_samples.detected_virus.assembly_summary.rpkmf.tsv"
     output:
-        count_file = "results/8_rpkmf_prep/filtered_reads/{sample}_filtered_count.txt"
+        subspecies="results/6_esviritu/es/Correlation/all_samples.subspecies.min10.tsv",
+        all_corr="results/6_esviritu/es/Correlation/all_samples.subspecies.spearman.all.tsv",
+        filt_corr="results/6_esviritu/es/Correlation/all_samples.subspecies.spearman.filtered.tsv"
+    threads:
+        config.get("correlation", {}).get("threads", 8)
+    conda:
+        "envs/python.yaml"
     resources:
-        mem_mb_per_cpu = config["regular_memory"],  # MB
-        runtime = 10,  # minutes
-        cpus_per_task = 1,
-        slurm_partition = config["regular_partition"],
-        slurm_account = config["account"]
+        slurm_partition=config["regular_partition"],
+        runtime=config["runtime"],
+        mem_mb_per_cpu=config["regular_memory"],
+        cpus_per_task=1,
+        slurm_account=config["slurm_account"]
     log:
-        out="log/count_filtered_reads_{sample}.log",
-        err="log/count_filtered_reads_{sample}.err"
+        out="log/6_esviritu/correlation/subspecies_corr.log",
+        err="log/6_esviritu/correlation/subspecies_corr.err"
+    params:
+        min_samples=config.get("correlation", {}).get("min_samples", 10),
+        thresholds=config.get("correlation", {}).get("thresholds", "0.6,0.7,0.8,0.9"),
+        p_threshold=config.get("correlation", {}).get("p_threshold", 0.05)
     shell:
         """
-        mkdir -p results/8_rpkmf_prep/filtered_reads
-        mkdir -p log
-        
-        # Count reads in both R1 and R2 files
-        r1_count=$(zcat {input.r1} | wc -l | awk '{{print $1/4}}')
-        r2_count=$(zcat {input.r2} | wc -l | awk '{{print $1/4}}')
-        
-        # Total filtered reads (R1 + R2)
-        total_reads=$(echo "$r1_count + $r2_count" | bc)
-        
-        echo $total_reads > {output.count_file}
-        
-        echo "Filtered reads counted for {wildcards.sample}: $total_reads"
+        mkdir -p results/6_esviritu/es/Correlation log/6_esviritu/correlation
+        python scripts/esviritu_subspecies_correlation.py --input {input.merged} \
+            --output-subspecies {output.subspecies} \
+            --output-all {output.all_corr} \
+            --output-filtered {output.filt_corr} \
+            --min-samples {params.min_samples} \
+            --thresholds {params.thresholds} \
+            --p-threshold {params.p_threshold} \
+            --threads {threads} \
+            > {log.out} 2> {log.err}
         """
-
-# Rule 13: Get contig lengths from virus FASTA
-rule get_contig_lengths:
-    input:
-        fasta = "database/ncbi_virref_20250801.fasta"
-    output:
-        lengths = "results/8_rpkmf_prep/contig_lengths.tsv"
-    resources:
-        mem_mb_per_cpu = config["regular_memory"],  # MB
-        runtime = 10,  # minutes
-        cpus_per_task = 1,
-        slurm_partition = config["regular_partition"],
-        slurm_account = config["account"]
-    log:
-        out="log/get_contig_lengths.log",
-        err="log/get_contig_lengths.err"
-    shell:
-        """
-        mkdir -p results/8_rpkmf_prep
-        mkdir -p log
-        
-        # Use seqkit to get sequence lengths
-        seqkit fx2tab --length --name --header-line {input.fasta} | \\
-            awk 'BEGIN{{OFS="\\t"}} NR==1{{print "Accession", "Length"}} NR>1{{print $1, $2}}' > {output.lengths} \\
-            2>> {log.err}
-        
-        echo "Contig lengths extracted: $(wc -l < {output.lengths}) sequences"
-        """
-
-# Rule 14: Convert CoverM count to RPKMF
-rule convert_count_to_rpkmf:
-    input:
-        count_tables = ["results/6_bowtie2/redundant/merged_count_table.tsv", 
-                       "results/6_bowtie2/redundant/merged_count_with_reference_table.tsv"],
-        filtered_counts = expand("results/8_rpkmf_prep/filtered_reads/{sample}_filtered_count.txt", sample=config["samples"]),
-        contig_lengths = "results/8_rpkmf_prep/contig_lengths.tsv"
-    output:
-        rpkmf_table = "results/8_rpkmf_prep/merged_rpkmf_table.tsv",
-        rpkmf_with_ref = "results/8_rpkmf_prep/merged_rpkmf_with_reference_table.tsv"
-    resources:
-        mem_mb_per_cpu = config["regular_memory"],  # MB
-        runtime = 15,  # minutes
-        cpus_per_task = 1,
-        slurm_partition = config["regular_partition"],
-        slurm_account = config["account"]
-    log:
-        out="log/convert_count_to_rpkmf.log",
-        err="log/convert_count_to_rpkmf.err"
-    shell:
-        """
-        mkdir -p results/8_rpkmf_prep
-        mkdir -p log
-        
-        python scripts/convert_count_to_rpkmf.py \
-            --count-table results/6_bowtie2/redundant/merged_count_table.tsv \
-            --count-with-ref-table results/6_bowtie2/redundant/merged_count_with_reference_table.tsv \
-            --filtered-reads-dir results/8_rpkmf_prep/filtered_reads \
-            --contig-lengths results/8_rpkmf_prep/contig_lengths.tsv \
-            --output-rpkmf {output.rpkmf_table} \
-            --output-rpkmf-ref {output.rpkmf_with_ref} \
-            >> {log.out} 2>> {log.err}
-            
-        echo "Count to RPKMF conversion completed successfully."
-        """
-
-
-
